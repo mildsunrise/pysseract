@@ -2,7 +2,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <tesseract/baseapi.h>
-#include <tesseract/genericvector.h>
 #include <sstream>
 
 namespace py = pybind11;
@@ -12,13 +11,22 @@ using tesseract::PageSegMode;
 using tesseract::ResultIterator;
 using tesseract::TessBaseAPI;
 
+/*! Basic rectangle */
+struct Box
+{
+    l_int32            x;           /*!< left coordinate                   */
+    l_int32            y;           /*!< top coordinate                    */
+    l_int32            w;           /*!< box width                         */
+    l_int32            h;           /*!< box height                        */
+};
+
 PYBIND11_MODULE(_pysseract, m) {
     m.def("apiVersion", &tesseract::TessBaseAPI::Version, "Tesseract API version as seen in the library");
     m.def("availableLanguages",
           []() {
               tesseract::TessBaseAPI api;
               api.Init(nullptr, nullptr);
-              GenericVector<STRING> glangs;
+              std::vector<std::string> glangs;
               api.GetAvailableLanguagesAsVector(&glangs);
               std::vector<std::string> langs(glangs.size());
               for (int i = 0; i < glangs.size(); i++) {
@@ -65,7 +73,7 @@ PYBIND11_MODULE(_pysseract, m) {
 
         1) char **configs, int configs_size <==> configsList
         
-        2) const GenericVector<STRING> *vars_vec, const GenericVector<STRING> *vars_values <==> settingDict
+        2) const std::vector<std::string> *vars_vec, const std::vector<std::string> *vars_values <==> settingDict
 
         `configsList` is a list of files from which configuration variables can be read
         `settingDict` is a dict object containing parameters and their values to be fed to Tesseract.
@@ -100,11 +108,11 @@ PYBIND11_MODULE(_pysseract, m) {
                      configs_[i] = const_cast<char *>(configs[i].c_str());
                  }
 
-                 GenericVector<STRING> vars_vec;
-                 GenericVector<STRING> vars_values;
+                 std::vector<std::string> vars_vec;
+                 std::vector<std::string> vars_values;
                  for (auto &&entry : settings) {
-                     vars_vec.push_back(STRING(entry.first.c_str()));
-                     vars_values.push_back(STRING(entry.second.c_str()));
+                     vars_vec.push_back(std::string(entry.first.c_str()));
+                     vars_values.push_back(std::string(entry.second.c_str()));
                  }
 
                  api->Init(datapath, language, mode, configs_, configs.size(), &vars_vec, &vars_values,
@@ -193,7 +201,7 @@ PYBIND11_MODULE(_pysseract, m) {
              "string rather than the underlying Leptonica Pix object.")
         .def("GetVariableAsString",
              [](TessBaseAPI &api, const char *name) {
-                 STRING str;
+                 std::string str;
                  bool res = api.GetVariableAsString(name, &str);
                  if (res) {
                      return str.c_str();

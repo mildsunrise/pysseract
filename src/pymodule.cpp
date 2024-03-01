@@ -4,6 +4,7 @@
 #include <tesseract/baseapi.h>
 #include <string.h>
 #include <sstream>
+#include <memory>
 
 namespace py = pybind11;
 using tesseract::OcrEngineMode;
@@ -81,12 +82,24 @@ static Pix* BufferToPix(py::buffer data) {
     return image;
 }
 
+static void SetImageChecked(TessBaseAPI& api, Pix* image) {
+    if (!image)
+        throw std::runtime_error("Failed creating / reading image");
+    api.SetImage(image);
+    pixDestroy(&image);
+}
+
+static void CheckInit(int ret) {
+    if (ret == -1)
+        throw std::runtime_error("Tesseract initialization failed");
+}
+
 PYBIND11_MODULE(_pysseract, m) {
     m.def("apiVersion", &tesseract::TessBaseAPI::Version, "Tesseract API version as seen in the library");
     m.def("availableLanguages",
           []() {
               tesseract::TessBaseAPI api;
-              api.Init(nullptr, nullptr);
+              CheckInit(api.Init(nullptr, nullptr));
               std::vector<std::string> glangs;
               api.GetAvailableLanguagesAsVector(&glangs);
               return glangs;
@@ -95,8 +108,8 @@ PYBIND11_MODULE(_pysseract, m) {
     m.def("defaultDataPath",
           []() {
               tesseract::TessBaseAPI api;
-              api.Init(nullptr, nullptr);
-              return api.GetDatapath();
+              CheckInit(api.Init(nullptr, nullptr));
+              return std::string(api.GetDatapath());
           },
           "return the default location Tesseract expects models to be located in");
 
@@ -139,26 +152,26 @@ PYBIND11_MODULE(_pysseract, m) {
         For information about working with the results of analysis, please see the documentation for ResultIterator or Pysseract.IterAt
     )pbdoc")
         .def(py::init([]() {
-            TessBaseAPI *api = new (TessBaseAPI);
-            api->Init(nullptr, nullptr);
-            return std::unique_ptr<TessBaseAPI>(api);
+            auto api = std::make_unique<TessBaseAPI>();
+            CheckInit(api->Init(nullptr, nullptr));
+            return api;
         }))
         .def(py::init([](const char *datapath, const char *language) {
-                 TessBaseAPI *api = new (TessBaseAPI);
-                 api->Init(datapath, language);
-                 return std::unique_ptr<TessBaseAPI>(api);
+                 auto api = std::make_unique<TessBaseAPI>();
+                 CheckInit(api->Init(datapath, language));
+                 return api;
              }),
              py::arg("datapath"), py::arg("language"))
         .def(py::init([](const char *datapath, const char *language, OcrEngineMode mode) {
-                 TessBaseAPI *api = new (TessBaseAPI);
-                 api->Init(datapath, language, mode);
-                 return std::unique_ptr<TessBaseAPI>(api);
+                 auto api = std::make_unique<TessBaseAPI>();
+                 CheckInit(api->Init(datapath, language, mode));
+                 return api;
              }),
              py::arg("datapath"), py::arg("language"), py::arg("engineMode"))
         .def(py::init([](const char *datapath, const char *language, OcrEngineMode mode,
                          std::vector<std::string> configs, std::unordered_map<std::string, std::string> settings,
                          bool set_only_non_debug_params) {
-                 TessBaseAPI *api = new (TessBaseAPI);
+                 auto api = std::make_unique<TessBaseAPI>();
 
                  char *configs_[configs.size()];
                  for (size_t i = 0; i < configs.size(); i++) {
@@ -172,9 +185,9 @@ PYBIND11_MODULE(_pysseract, m) {
                      vars_values.push_back(std::string(entry.second));
                  }
 
-                 api->Init(datapath, language, mode, configs_, configs.size(), &vars_vec, &vars_values,
-                           set_only_non_debug_params);
-                 return std::unique_ptr<TessBaseAPI>(api);
+                 CheckInit(api->Init(datapath, language, mode, configs_, configs.size(), &vars_vec, &vars_values,
+                                     set_only_non_debug_params));
+                 return api;
              }),
              py::arg("datapath"), py::arg("language"), py::arg("engineMode"), py::arg("configsList"),
              py::arg("settingDict"), py::arg("setOnlyNonDebugParams"))
@@ -267,14 +280,13 @@ PYBIND11_MODULE(_pysseract, m) {
              "Set the pixel-per-inch value for the source image")
         .def("SetImageFromPath",
              [](TessBaseAPI &api, const char *imgpath) {
-                 Pix *image = pixRead(imgpath);
-                 api.SetImage(image);
+                 SetImageChecked(api, pixRead(imgpath));
              },
              py::arg("imgpath"), "Read an image from a given fully-qualified file path")
         .def("SetImageFromBytes",
              [](TessBaseAPI &api, const std::string &bytes) {
                  Pix *image = pixReadMem((unsigned char *)bytes.data(), bytes.size());
-                 api.SetImage(image);
+                 SetImageChecked(api, image);
              },
              py::arg("bytes"), "Read an image from a string of bytes")
         .def("SetImageFromArray",

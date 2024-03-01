@@ -4,6 +4,7 @@
 #include <tesseract/baseapi.h>
 #include <tesseract/genericvector.h>
 #include <sstream>
+#include <string.h>
 
 namespace py = pybind11;
 using tesseract::OcrEngineMode;
@@ -11,6 +12,66 @@ using tesseract::PageIteratorLevel;
 using tesseract::PageSegMode;
 using tesseract::ResultIterator;
 using tesseract::TessBaseAPI;
+
+static void CopyRowMajor(uint8_t* dst, const py::buffer_info& info) {
+    if (!info.size) return;
+
+    uint8_t* ptr = (uint8_t*) info.ptr;
+    ssize_t ndim = info.ndim, itemsize = info.itemsize;
+    ssize_t strides [ndim], shape [ndim], index [ndim];
+    memcpy(strides, info.strides.data(), ndim * sizeof(ssize_t));
+    memcpy(shape, info.shape.data(), ndim * sizeof(ssize_t));
+    memset(index, 0, sizeof(index));
+
+    // as an optimization, coerce trailing axes into bigger elements if they're densely packed
+    while (ndim > 0 && strides[ndim-1] == itemsize)
+        itemsize *= shape[--ndim];
+
+    for (ssize_t i = 0; i < ndim / 2; i++) {
+        std::swap(strides[i], strides[ndim-1-i]);
+        std::swap(shape[i], shape[ndim-1-i]);
+    }
+
+    while (true) {
+        memcpy(dst, ptr, itemsize);
+        dst += itemsize;
+        ssize_t axis = 0;
+        while (true) {
+            if (axis >= ndim) return;
+            index[axis]++;
+            ptr += strides[axis];
+            if (index[axis] < shape[axis]) break;
+            ptr -= shape[axis] * strides[axis];
+            index[axis] = 0;
+            axis++;
+        }
+    }
+}
+
+static Pix* BufferToPix(py::buffer data) {
+    py::buffer_info info = data.request();
+
+    if (!(
+        (info.itemsize == 1 && info.format == py::format_descriptor<uint8_t>::format()) ||
+        (info.itemsize == 2 && info.format == py::format_descriptor<uint16_t>::format())
+    ))
+        throw std::runtime_error("Incompatible format: expected a u8 or u16 array!");
+
+    if (!(info.ndim == 2 || info.ndim == 3))
+        throw std::runtime_error("Incompatible dimensions");
+    size_t channels = info.ndim == 2 ? 1 : info.shape[2];
+    if (!(channels == 1 || channels == 3 || channels == 4))
+        throw std::runtime_error("Incompatible number of channels");
+
+    if (channels != 1 && info.itemsize != 1)
+        throw std::runtime_error("Color images only support u8");
+
+    Pix *image = pixCreateNoInit(info.shape[1], info.shape[0], info.itemsize * 8 * channels);
+    if (!image)
+        throw std::runtime_error("Failed to allocate image memory");
+    CopyRowMajor((uint8_t*) pixGetData(image), info);
+    return image;
+}
 
 PYBIND11_MODULE(_pysseract, m) {
     m.def("apiVersion", &tesseract::TessBaseAPI::Version, "Tesseract API version as seen in the library");
@@ -215,6 +276,11 @@ PYBIND11_MODULE(_pysseract, m) {
                  api.SetImage(image);
              },
              py::arg("bytes"), "Read an image from a string of bytes")
+        .def("SetImageFromArray",
+             [](TessBaseAPI &api, py::buffer data) {
+                 SetImageChecked(api, BufferToPix(data));
+             },
+             py::arg("Buffer"), "Read an image from a readable buffer holding pixel data")
         .def("SetVariable", &TessBaseAPI::SetVariable, py::arg("name"), py::arg("value"),
              "Note: Must be called after Init(). Only works for non-init variables.")
         .def("SetRectangle", &TessBaseAPI::SetRectangle, py::arg("left"), py::arg("top"), py::arg("width"),

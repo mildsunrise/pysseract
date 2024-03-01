@@ -28,11 +28,7 @@ PYBIND11_MODULE(_pysseract, m) {
               api.Init(nullptr, nullptr);
               std::vector<std::string> glangs;
               api.GetAvailableLanguagesAsVector(&glangs);
-              std::vector<std::string> langs(glangs.size());
-              for (int i = 0; i < glangs.size(); i++) {
-                  langs[i] = glangs[i].c_str();
-              }
-              return langs;
+              return glangs;
           },
           "return a list of available languages from TESSDATA_PREFIX");
     m.def("defaultDataPath",
@@ -111,8 +107,8 @@ PYBIND11_MODULE(_pysseract, m) {
                  std::vector<std::string> vars_vec;
                  std::vector<std::string> vars_values;
                  for (auto &&entry : settings) {
-                     vars_vec.push_back(std::string(entry.first.c_str()));
-                     vars_values.push_back(std::string(entry.second.c_str()));
+                     vars_vec.push_back(std::string(entry.first));
+                     vars_values.push_back(std::string(entry.second));
                  }
 
                  api->Init(datapath, language, mode, configs_, configs.size(), &vars_vec, &vars_values,
@@ -203,10 +199,7 @@ PYBIND11_MODULE(_pysseract, m) {
              [](TessBaseAPI &api, const char *name) {
                  std::string str;
                  bool res = api.GetVariableAsString(name, &str);
-                 if (res) {
-                     return str.c_str();
-                 }
-                 return "";
+                 return str;
              },
              "Get value of named variable as a string, if it exists.")
         .def("SetSourceResolution", &TessBaseAPI::SetSourceResolution, py::arg("ppi"),
